@@ -1,17 +1,25 @@
-# 2048 Game with iCloud History
+# 2048 Game with History Tracking
 
-This is a complete implementation of the 2048 game with history tracking and iCloud synchronization.
+This is a complete implementation of the 2048 game with history tracking. The app works with both personal development teams (free Apple IDs) and paid developer accounts.
 
 ## Features
 - Complete 2048 game implementation with swipe controls
 - Game history tracking with local storage
-- iCloud synchronization using CloudKit
+- iCloud synchronization using CloudKit (for paid developer accounts)
 - Statistics display (best score, average score, total games)
 - Sync status indicators
 
-## iCloud Configuration Required
+## Configuration for Personal Development Teams (Free Apple IDs)
 
-To use the iCloud features, you need to configure the project in Xcode:
+The app will work with personal development teams, but iCloud features will be automatically disabled since they're not supported with free accounts. The app will:
+- Function as a complete 2048 game
+- Save game history locally
+- Display statistics
+- Gracefully handle the absence of iCloud
+
+## Configuration for Paid Developer Accounts
+
+To enable iCloud synchronization, you need to configure the project in Xcode:
 
 1. **Enable iCloud Capability**:
    - Open the project in Xcode
@@ -28,28 +36,22 @@ To use the iCloud features, you need to configure the project in Xcode:
    - Make sure you have a valid Apple Developer Team selected
    - Set an appropriate Bundle Identifier in the project settings
 
-4. **Entitlements**:
-   - The entitlements file has been created but needs to be properly linked in Xcode
-
 ## Files Overview
 
 - `ContentView.swift`: Main game interface with swipe controls
 - `Game2048Model.swift`: Game logic and state management
-- `GameHistory.swift`: History tracking with iCloud sync
+- `GameHistory.swift`: History tracking with optional iCloud sync
 - `GameHistoryView.swift`: History display with statistics
-- `test_app_ios.entitlements`: iCloud entitlements configuration
+- `test_app_ios.entitlements`: Minimal entitlements configuration
 
 ## Testing
 
 1. Run the app on a device or simulator
 2. Play a few games to generate history
-3. Sign in with the same Apple ID on multiple devices
-4. Verify that game history syncs across devices
+3. For paid accounts: Sign in with the same Apple ID on multiple devices to test iCloud sync
 
-## Troubleshooting
+## Notes
 
-If you encounter issues:
-1. Ensure you're signed in with an Apple ID that has iCloud enabled
-2. Check that the iCloud capability is properly configured in Xcode
-3. Verify that your Apple Developer account has CloudKit enabled
-4. Clean and rebuild the project after making configuration changes
+- The app gracefully handles the absence of iCloud for personal development teams
+- All core game functionality works without iCloud
+- Local history storage is always available

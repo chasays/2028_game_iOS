@@ -30,29 +30,38 @@ class GameHistory: ObservableObject {
     @Published var lastSyncError: String? = nil
     
     private let historyKey = "GameHistoryRecords"
+    #if canImport(CloudKit)
     private let cloudKitContainer = CKContainer.default()
     private let publicDatabase: CKDatabase
     private let privateDatabase: CKDatabase
     private var syncToken: CKServerChangeToken? = nil
+    private var isCloudKitAvailable: Bool = true
+    #endif
     
     init() {
+        #if canImport(CloudKit)
         self.publicDatabase = cloudKitContainer.publicCloudDatabase
         self.privateDatabase = cloudKitContainer.privateCloudDatabase
+        checkCloudKitAvailability()
+        #endif
         loadHistory()
-        loadFromCloud()
     }
     
     func addRecord(score: Int, highestTile: Int, moves: Int) {
         let record = GameRecord(score: score, highestTile: highestTile, moves: moves)
         records.append(record)
         saveHistory()
+        #if canImport(CloudKit)
         saveToCloud(record: record)
+        #endif
     }
     
     func clearHistory() {
         records.removeAll()
         saveHistory()
+        #if canImport(CloudKit)
         clearCloudHistory()
+        #endif
     }
     
     private func saveHistory() {
@@ -77,86 +86,89 @@ class GameHistory: ObservableObject {
     
     // MARK: - iCloud Integration
     
-    private func saveToCloud(record: GameRecord) {
+    #if canImport(CloudKit)
+    private func checkCloudKitAvailability() {
         // Check if iCloud is available
         cloudKitContainer.accountStatus { (status, error) in
-            if error != nil || status != .available {
-                DispatchQueue.main.async {
-                    self.lastSyncError = "iCloud not available"
-                }
-                return
-            }
-            
-            let cloudRecord = CKRecord(recordType: "GameRecord")
-            cloudRecord["score"] = record.score
-            cloudRecord["highestTile"] = record.highestTile
-            cloudRecord["moves"] = record.moves
-            cloudRecord["date"] = record.date
-            
             DispatchQueue.main.async {
-                self.isSyncing = true
+                if error != nil || status != .available {
+                    self.isCloudKitAvailable = false
+                    self.lastSyncError = "iCloud not available with personal development team"
+                } else {
+                    self.isCloudKitAvailable = true
+                    // Load from cloud if available
+                    self.loadFromCloud()
+                }
             }
-            
-            self.privateDatabase.save(cloudRecord) { (savedRecord, error) in
-                DispatchQueue.main.async {
-                    self.isSyncing = false
-                    if let error = error {
-                        self.lastSyncError = "Failed to save to iCloud: \(error.localizedDescription)"
-                        print("Error saving to iCloud: \(error.localizedDescription)")
-                    } else {
-                        self.lastSyncError = nil
-                    }
+        }
+    }
+    
+    private func saveToCloud(record: GameRecord) {
+        // Skip if CloudKit is not available
+        guard isCloudKitAvailable else { return }
+        
+        let cloudRecord = CKRecord(recordType: "GameRecord")
+        cloudRecord["score"] = record.score
+        cloudRecord["highestTile"] = record.highestTile
+        cloudRecord["moves"] = record.moves
+        cloudRecord["date"] = record.date
+        
+        DispatchQueue.main.async {
+            self.isSyncing = true
+        }
+        
+        privateDatabase.save(cloudRecord) { (savedRecord, error) in
+            DispatchQueue.main.async {
+                self.isSyncing = false
+                if let error = error {
+                    self.lastSyncError = "Failed to save to iCloud: \(error.localizedDescription)"
+                    print("Error saving to iCloud: \(error.localizedDescription)")
+                } else {
+                    self.lastSyncError = nil
                 }
             }
         }
     }
     
     private func loadFromCloud() {
-        // Check if iCloud is available
-        cloudKitContainer.accountStatus { (status, error) in
-            if error != nil || status != .available {
-                DispatchQueue.main.async {
-                    self.lastSyncError = "iCloud not available"
-                }
-                return
-            }
-            
-            let query = CKQuery(recordType: "GameRecord", predicate: NSPredicate(value: true))
-            query.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
-            
+        // Skip if CloudKit is not available
+        guard isCloudKitAvailable else { return }
+        
+        let query = CKQuery(recordType: "GameRecord", predicate: NSPredicate(value: true))
+        query.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
+        
+        DispatchQueue.main.async {
+            self.isSyncing = true
+        }
+        
+        privateDatabase.perform(query, inZoneWith: nil) { (records, error) in
             DispatchQueue.main.async {
-                self.isSyncing = true
-            }
-            
-            self.privateDatabase.perform(query, inZoneWith: nil) { (records, error) in
-                DispatchQueue.main.async {
-                    self.isSyncing = false
-                    if let error = error {
-                        self.lastSyncError = "Failed to load from iCloud: \(error.localizedDescription)"
-                        print("Error loading from iCloud: \(error.localizedDescription)")
-                        return
-                    }
-                    
-                    guard let cloudRecords = records else { return }
-                    
-                    var newRecords: [GameRecord] = []
-                    for cloudRecord in cloudRecords {
-                        if let score = cloudRecord["score"] as? Int,
-                           let highestTile = cloudRecord["highestTile"] as? Int,
-                           let moves = cloudRecord["moves"] as? Int,
-                           let date = cloudRecord["date"] as? Date {
-                            
-                            let record = GameRecord(score: score, highestTile: highestTile, moves: moves, date: date)
-                            newRecords.append(record)
-                        }
-                    }
-                    
-                    // Merge with existing records, avoiding duplicates
-                    let mergedRecords = self.mergeRecords(local: self.records, cloud: newRecords)
-                    self.records = mergedRecords
-                    self.saveHistory() // Save combined records locally
-                    self.lastSyncError = nil
+                self.isSyncing = false
+                if let error = error {
+                    self.lastSyncError = "Failed to load from iCloud: \(error.localizedDescription)"
+                    print("Error loading from iCloud: \(error.localizedDescription)")
+                    return
                 }
+                
+                guard let cloudRecords = records else { return }
+                
+                var newRecords: [GameRecord] = []
+                for cloudRecord in cloudRecords {
+                    if let score = cloudRecord["score"] as? Int,
+                       let highestTile = cloudRecord["highestTile"] as? Int,
+                       let moves = cloudRecord["moves"] as? Int,
+                       let date = cloudRecord["date"] as? Date {
+                        
+                        let record = GameRecord(score: score, highestTile: highestTile, moves: moves, date: date)
+                        newRecords.append(record)
+                    }
+                }
+                
+                // Merge with existing records, avoiding duplicates
+                let mergedRecords = self.mergeRecords(local: self.records, cloud: newRecords)
+                self.records = mergedRecords
+                self.saveHistory() // Save combined records locally
+                self.lastSyncError = nil
             }
         }
     }
@@ -182,64 +194,58 @@ class GameHistory: ObservableObject {
     }
     
     private func clearCloudHistory() {
-        // Check if iCloud is available
-        cloudKitContainer.accountStatus { (status, error) in
-            if error != nil || status != .available {
+        // Skip if CloudKit is not available
+        guard isCloudKitAvailable else { return }
+        
+        let query = CKQuery(recordType: "GameRecord", predicate: NSPredicate(value: true))
+        
+        DispatchQueue.main.async {
+            self.isSyncing = true
+        }
+        
+        privateDatabase.perform(query, inZoneWith: nil) { (records, error) in
+            if let error = error {
                 DispatchQueue.main.async {
-                    self.lastSyncError = "iCloud not available"
+                    self.isSyncing = false
+                    self.lastSyncError = "Failed to query records for deletion: \(error.localizedDescription)"
+                    print("Error querying records for deletion: \(error.localizedDescription)")
                 }
                 return
             }
             
-            let query = CKQuery(recordType: "GameRecord", predicate: NSPredicate(value: true))
-            
-            DispatchQueue.main.async {
-                self.isSyncing = true
+            guard let recordsToDelete = records else { 
+                DispatchQueue.main.async {
+                    self.isSyncing = false
+                }
+                return 
             }
             
-            self.privateDatabase.perform(query, inZoneWith: nil) { (records, error) in
-                if let error = error {
-                    DispatchQueue.main.async {
-                        self.isSyncing = false
-                        self.lastSyncError = "Failed to query records for deletion: \(error.localizedDescription)"
-                        print("Error querying records for deletion: \(error.localizedDescription)")
+            let group = DispatchGroup()
+            var deletionErrors: [String] = []
+            
+            for record in recordsToDelete {
+                group.enter()
+                self.privateDatabase.delete(withRecordID: record.recordID) { (_, error) in
+                    if let error = error {
+                        deletionErrors.append(error.localizedDescription)
                     }
-                    return
+                    group.leave()
                 }
-                
-                guard let recordsToDelete = records else { 
-                    DispatchQueue.main.async {
-                        self.isSyncing = false
-                    }
-                    return 
-                }
-                
-                let group = DispatchGroup()
-                var deletionErrors: [String] = []
-                
-                for record in recordsToDelete {
-                    group.enter()
-                    self.privateDatabase.delete(withRecordID: record.recordID) { (_, error) in
-                        if let error = error {
-                            deletionErrors.append(error.localizedDescription)
-                        }
-                        group.leave()
-                    }
-                }
-                
-                group.notify(queue: .main) {
-                    self.isSyncing = false
-                    if !deletionErrors.isEmpty {
-                        self.lastSyncError = "Some records failed to delete: \(deletionErrors.joined(separator: ", "))"
-                        print("Some iCloud records failed to delete: \(deletionErrors.joined(separator: ", "))")
-                    } else {
-                        self.lastSyncError = nil
-                        print("All iCloud records deleted successfully")
-                    }
+            }
+            
+            group.notify(queue: .main) {
+                self.isSyncing = false
+                if !deletionErrors.isEmpty {
+                    self.lastSyncError = "Some records failed to delete: \(deletionErrors.joined(separator: ", "))"
+                    print("Some iCloud records failed to delete: \(deletionErrors.joined(separator: ", "))")
+                } else {
+                    self.lastSyncError = nil
+                    print("All iCloud records deleted successfully")
                 }
             }
         }
     }
+    #endif
     
     // MARK: - Utility Methods
     
